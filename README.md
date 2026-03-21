@@ -1,4 +1,4 @@
-# Gargantua
+ <h1 align="center">⚫ Gargantua</h1>
 
 ![Gargantua Screenshot 3](screenshots_and_demos/3.png)
 
@@ -48,6 +48,10 @@ npm run dev
 - `npm run lint` - Run ESLint
 
 ## Screenshots and Demos
+
+### Video Demo
+
+[![Watch the demo on YouTube](screenshots_and_demos/embed_youtube.png)](https://youtu.be/zjDZjn7TZ2M)
 
 ### Gallery
 
@@ -190,32 +194,39 @@ In short: this is a procedural-reactive audio system, not a static soundtrack.
 
 ### Audio Signal Flow
 
-```mermaid
-flowchart LR
-	A[Simulation State\nmass, spin, fps, camera distance] --> B[BlackholeAudioEngine\nprocedural synth + modulation]
-	A --> C[Distance->Cutoff Mapper]
+```text
+[Simulation State: mass, spin, fps, camera distance]
+		|
+		+--> [Distance -> Cutoff Mapper] ----+--> [Post Lowpass (synth chain)]
+		|                                     |
+		|                                     +--> [Lowpass (blackhole.mp3)]
+		|
+		+--> [BlackholeAudioEngine: procedural synth + modulation]
+				|
+				v
+			  [Pre Drive]
+				|
+				v
+		   [WaveShaper Distortion]
+				|
+				v
+			[Post Lowpass]
+				|
+				v
+			[Stereo Panner]
+				|
+				+------------------------+
+								 |
+[blackhole.mp3] --> [Lowpass distance-reactive] -> [Layer Gain] -+
+[ambient.mp3]   --> [Ambient Gain no-cutoff]    -> [Layer Gain] -+-> [Master Gain]
+											|
+											v
+									[Dynamics Compressor]
+											|
+											v
+										 [Audio Output]
 
-	B --> D[Pre Drive]
-	D --> E[WaveShaper Distortion]
-	E --> F[Post Lowpass]
-	F --> G[Stereo Panner]
-
-	H[blackhole.mp3] --> I[Lowpass Filter\n(distance-reactive)]
-	J[ambient.mp3] --> K[Ambient Gain\n(no cutoff)]
-
-	C --> F
-	C --> I
-
-	I --> L[Layer Gain]
-	K --> M[Layer Gain]
-	G --> N[Master Gain]
-	L --> N
-	M --> N
-
-	N --> O[Dynamics Compressor]
-	O --> P[Audio Output]
-
-	Q[Events\nmass-click, horizon pulse, chaos burst] --> B
+[Events: mass-click, horizon pulse, chaos burst] ---> [BlackholeAudioEngine]
 ```
 
 This flow is updated in real time, so the perceived tone, motion, and intensity continuously evolve with observer movement and black hole parameters.
