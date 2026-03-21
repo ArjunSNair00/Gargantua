@@ -1,0 +1,10 @@
+{
+  "synthGain": 1,
+  "modulationAmount": 1,
+  "cutoffScale": 1,
+  "cutoffOffset": 0,
+  "distortionAmount": 1,
+  "chaosAmount": 0.95,
+  "blackholeMp3Gain": 0.13,
+  "ambientGain": 0.09
+}
