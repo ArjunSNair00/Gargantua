@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-export default function FPSCamera({ active, mass = 1.5 }) {
+export default function FPSCamera({ active, mass = 1.5, onCameraPoseUpdate }) {
   const { camera, gl } = useThree();
 
   const state = useRef({
@@ -12,6 +12,7 @@ export default function FPSCamera({ active, mass = 1.5 }) {
     right: false,
     up: false,
     down: false,
+    boost: false,
     rollMode: false,
   });
 
@@ -47,6 +48,7 @@ export default function FPSCamera({ active, mass = 1.5 }) {
       if (code === "keya") state.current.left = true;
       if (code === "keyd") state.current.right = true;
       if (code === "keyl") state.current.left = true;
+      if (code === "altleft" || code === "altright") state.current.boost = true;
       if (code === "keyr") {
         state.current.rollMode = true;
       }
@@ -61,6 +63,8 @@ export default function FPSCamera({ active, mass = 1.5 }) {
       if (code === "keys") state.current.backward = false;
       if (code === "keya" || code === "keyl") state.current.left = false;
       if (code === "keyd") state.current.right = false;
+      if (code === "altleft" || code === "altright")
+        state.current.boost = false;
       if (code === "keyr") state.current.rollMode = false;
 
       if (e.key === "Shift") state.current.up = false;
@@ -84,16 +88,23 @@ export default function FPSCamera({ active, mass = 1.5 }) {
       }
     };
 
+    const onBlur = () => {
+      state.current.boost = false;
+    };
+
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("blur", onBlur);
     gl.domElement.addEventListener("mousedown", onMouseDown);
 
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("blur", onBlur);
       gl.domElement.removeEventListener("mousedown", onMouseDown);
+      state.current.boost = false;
       if (document.pointerLockElement === gl.domElement) {
         document.exitPointerLock();
       }
@@ -114,14 +125,15 @@ export default function FPSCamera({ active, mass = 1.5 }) {
     camera.getWorldDirection(direction);
     rightVec.copy(direction).cross(camera.up).normalize();
     upVec.copy(rightVec).cross(direction).normalize();
+    const thrustAccel = thrustSpeed * (state.current.boost ? 2.5 : 1.0);
 
     // Apply thrust to velocity vector (momentum)
     if (moveZ !== 0)
-      velocity.current.addScaledVector(direction, moveZ * thrustSpeed);
+      velocity.current.addScaledVector(direction, moveZ * thrustAccel);
     if (moveX !== 0)
-      velocity.current.addScaledVector(rightVec, moveX * thrustSpeed);
+      velocity.current.addScaledVector(rightVec, moveX * thrustAccel);
     if (moveY !== 0)
-      velocity.current.addScaledVector(upVec, moveY * thrustSpeed);
+      velocity.current.addScaledVector(upVec, moveY * thrustAccel);
 
     // --- GRAVITY ---
     // Calculate distance squared to the black hole at origin (0,0,0)
@@ -146,6 +158,10 @@ export default function FPSCamera({ active, mass = 1.5 }) {
       .copy(upVec)
       .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(direction, 0));
     camera.up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+
+    if (onCameraPoseUpdate) {
+      onCameraPoseUpdate(camera.position, camera.quaternion);
+    }
   });
 
   return null;

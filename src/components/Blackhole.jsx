@@ -76,15 +76,13 @@ void main() {
   float R_in = Rs * 2.5;      // Inner disk edge (further out in Gargantua)
   float R_out = Rs * 9.0;     // Outer disk edge
 
-  float acc = 0.0;
-  float isBlackHole = 0.0;
+    float diskHalfThickness = 0.07;
 
   for(int i = 0; i < 300; i++) {
       float r = length(pos);
       
       // Hit the Event Horizon
       if(r < Rs) {
-          isBlackHole = 1.0;
           break;
       }
       
@@ -97,59 +95,108 @@ void main() {
       vec3 gravity = -normalize(pos) * (1.5 * Rs * Rs) / (r * r * r);
       rd = normalize(rd + gravity * dt);
 
-      // --- ACCRETION DISK ---
-      // We sample the disk when the ray is close to the equatorial plane (y = 0)
-      float distToPlane = abs(pos.y);
-      
-      // Disk gets thicker towards the outside
-      float diskThickness = 0.04 + smoothstep(R_in, R_out, r) * 0.15; 
-      
-      if(distToPlane < diskThickness && r > R_in && r < R_out) {
-          // Circular coordinates inside the disk
-          float angle = atan(pos.z, pos.x);
-          
-          // Keplerian velocity: v proportional to 1/sqrt(r)
-          float velocity = 2.0 / sqrt(r); 
-          float timeOffset = uTime * velocity;
-          
-          vec3 polarPos = vec3(angle - timeOffset, 0.0, r);
-          
-          // Fluid noise structure
-          float densityNoise = fbm(vec3(polarPos.x * 8.0, polarPos.y * 10.0, polarPos.z * 1.5));
-          
-          // Gradients to fade out edges smoothly
-          float edgeFade = smoothstep(R_in, R_in + 0.5, r) * (1.0 - smoothstep(R_out - 2.0, R_out, r));
-          float heightFade = 1.0 - (distToPlane / diskThickness);
-          
-          float density = densityNoise * edgeFade * heightFade;
-          
-          if(density > 0.01) {
-              // --- RELATIVISTIC DOPPLER BEAMING ---
-              // Fluid moves perpendicular to radius vector in XZ plane
-              vec3 flowDir = normalize(vec3(-pos.z, 0.0, pos.x));
-              
-              // Weaker doppler multiplier so it doesn't zero out the receding side entirely
-              float dopplerFactor = dot(rd, flowDir) * velocity; 
-              
-              // Base temperature color: Gargantua is bright orange/yellow fading to red
-              vec3 baseColor = mix(vec3(1.0, 0.9, 0.6), vec3(1.0, 0.4, 0.1), clamp((r - R_in) / (R_out - R_in), 0.0, 1.0));
-              
-              // Keep some warmth even when moving away
-              vec3 shiftColor = mix(vec3(0.8, 0.15, 0.0), vec3(0.7, 0.9, 1.0), clamp(dopplerFactor + 0.5, 0.0, 1.0));
-              
-              float brightness = density * 0.14;
-              
-              // Prevent the receding side from going completely black with a clamp floor
-              float beaming = pow(clamp(1.0 + dopplerFactor * 0.8, 0.2, 2.4), 1.55);
-              brightness *= beaming;
-              
-              col += baseColor * shiftColor * brightness;
-              acc += density * 0.1;
+        // --- CLOSEST-HIT TESTING (HORIZON VS DISK SURFACE) ---
+        float tHorizon = 1e20;
+        {
+          float b = dot(pos, rd);
+          float c = dot(pos, pos) - Rs * Rs;
+          float h = b * b - c;
+          if(h >= 0.0) {
+            float sqrtH = sqrt(h);
+            float tNear = -b - sqrtH;
+            float tFar = -b + sqrtH;
+            if(tNear >= 0.0) {
+              tHorizon = tNear;
+            } else if(tFar >= 0.0) {
+              tHorizon = tFar;
+            }
           }
-      }
+        }
+
+        float tDisk = 1e20;
+        vec3 diskHitPos = vec3(0.0);
+        float diskEdgeFade = 0.0;
+        float diskThicknessFade = 0.0;
+        float diskFacing = 0.0;
+
+        if(abs(rd.y) > 0.0001) {
+          float tTop = (diskHalfThickness - pos.y) / rd.y;
+          float tBottom = (-diskHalfThickness - pos.y) / rd.y;
+          float tEnter = min(tTop, tBottom);
+          float tExit = max(tTop, tBottom);
+
+          float tSurface = tEnter;
+          if(tSurface < 0.0) {
+            tSurface = tExit;
+          }
+
+          if(tSurface >= 0.0) {
+            vec3 candidateHit = pos + rd * tSurface;
+            float hitR = length(candidateHit);
+            if(hitR > R_in && hitR < R_out) {
+              vec3 diskNormal = vec3(0.0, 1.0, 0.0);
+              diskFacing = abs(dot(rd, diskNormal));
+
+              float edgeIn = smoothstep(R_in, R_in + 0.6, hitR);
+              float edgeOut = 1.0 - smoothstep(R_out - 2.0, R_out, hitR);
+              diskEdgeFade = max(0.0, edgeIn * edgeOut);
+
+              float insideTravel = max(0.0, tExit - max(tEnter, 0.0));
+              float slabFade = smoothstep(0.0, diskHalfThickness * 2.5, insideTravel);
+              diskThicknessFade = max(0.35, slabFade);
+
+              tDisk = tSurface;
+              diskHitPos = candidateHit;
+            }
+          }
+        }
+
+        float tClosest = min(tHorizon, tDisk);
+        if(tClosest <= dt) {
+          if(tHorizon <= tDisk) {
+            // Horizon occludes everything behind it.
+            col = vec3(0.0);
+            break;
+          }
+
+          float angle = atan(diskHitPos.z, diskHitPos.x);
+          float hitR = length(diskHitPos);
+          float velocity = 2.0 / sqrt(max(hitR, 0.001));
+          float timeOffset = uTime * velocity;
+
+          vec3 polarPos = vec3(angle - timeOffset, 0.0, hitR);
+          float densityNoise = fbm(vec3(polarPos.x * 8.0, polarPos.y * 10.0, polarPos.z * 1.5));
+          float density = clamp(densityNoise * 0.75 + 0.25, 0.0, 1.0);
+
+          vec3 flowDir = normalize(vec3(-diskHitPos.z, 0.0, diskHitPos.x));
+          float dopplerFactor = dot(rd, flowDir) * velocity;
+
+          vec3 baseColor = mix(
+          vec3(1.0, 0.9, 0.6),
+          vec3(1.0, 0.4, 0.1),
+          clamp((hitR - R_in) / (R_out - R_in), 0.0, 1.0)
+          );
+
+          vec3 shiftColor = mix(
+          vec3(0.8, 0.15, 0.0),
+          vec3(0.7, 0.9, 1.0),
+          clamp(dopplerFactor + 0.5, 0.0, 1.0)
+          );
+
+          float facingWeight = mix(0.65, 1.25, pow(clamp(diskFacing, 0.0, 1.0), 0.45));
+          float baseEmission = 0.34 * diskEdgeFade;
+          float texturedEmission = density * 0.88 * diskEdgeFade * diskThicknessFade;
+          float brightness = (baseEmission + texturedEmission) * facingWeight;
+          float beaming = pow(clamp(1.0 + dopplerFactor * 0.8, 0.2, 2.4), 1.55);
+          brightness *= beaming;
+
+          col = baseColor * shiftColor * brightness;
+          break;
+        }
 
       // Adaptive ray step-size: Move slower near gravity well and near disk plane, faster in empty space
-      float safeDist = min(abs(r - Rs * 1.5), distToPlane);
+        float distToTopFace = abs(pos.y - diskHalfThickness);
+        float safeDist = min(abs(r - Rs * 1.5), distToTopFace);
       dt = clamp(safeDist * 0.2, 0.02, 1.0);
       
       pos += rd * dt;
@@ -160,7 +207,7 @@ void main() {
   col = col / (1.0 + col); // Reinhard tone mapping
   col = pow(col, vec3(1.0 / 2.2)); // Gamma correction
 
-  gl_FragColor = vec4(col, clamp(acc, 0.0, 1.0) + (length(col) > 0.1 ? 1.0 : 0.0));
+  gl_FragColor = vec4(col, 1.0);
 }
 `;
 
@@ -214,7 +261,7 @@ export default function Blackhole({ mass = 1.0, spin = 0.0 }) {
         fragmentShader={fragmentShader}
         uniforms={uniforms}
         side={THREE.BackSide}
-        transparent={true}
+        transparent={false}
       />
     </mesh>
   );

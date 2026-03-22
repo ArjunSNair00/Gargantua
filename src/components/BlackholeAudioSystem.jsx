@@ -19,8 +19,15 @@ export default function BlackholeAudioSystem({
   const engineRef = useRef(null);
   const blackholeLayerRef = useRef(null);
   const ambientLayerRef = useRef(null);
+  const enabledRef = useRef(enabled);
+  const controlsRef = useRef(controls);
   const previousMass = useRef(mass);
   const previousNearHorizon = useRef(false);
+
+  useEffect(() => {
+    enabledRef.current = enabled;
+    controlsRef.current = controls;
+  }, [enabled, controls]);
 
   const ensureLayer = async ({ engine, src, withCutoff, initialGain }) => {
     const layerRef = withCutoff ? blackholeLayerRef : ambientLayerRef;
@@ -77,28 +84,38 @@ export default function BlackholeAudioSystem({
       if (!current) {
         return;
       }
-      await current.resume();
-      current.setEnabled(enabled);
+
+      try {
+        await current.resume();
+      } catch {
+        // Autoplay policies can block resume until user/browser allows it.
+      }
+
+      current.setEnabled(enabledRef.current);
+
+      const liveControls = controlsRef.current;
 
       const blackholeLayer = await ensureLayer({
         engine: current,
         src: blackholeMp3,
         withCutoff: true,
         initialGain:
-          controls?.blackholeMp3Gain ?? audioMatrixDefaults.blackholeMp3Gain,
+          liveControls?.blackholeMp3Gain ??
+          audioMatrixDefaults.blackholeMp3Gain,
       });
       const ambientLayer = await ensureLayer({
         engine: current,
         src: ambientMp3,
         withCutoff: false,
-        initialGain: controls?.ambientGain ?? audioMatrixDefaults.ambientGain,
+        initialGain:
+          liveControls?.ambientGain ?? audioMatrixDefaults.ambientGain,
       });
 
       if (!blackholeLayer || !ambientLayer) {
         return;
       }
 
-      if (enabled && blackholeLayer.audioEl.paused) {
+      if (enabledRef.current && blackholeLayer.audioEl.paused) {
         try {
           await blackholeLayer.audioEl.play();
           await ambientLayer.audioEl.play();
@@ -108,12 +125,30 @@ export default function BlackholeAudioSystem({
       }
     };
 
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        unlockAudio();
+      }
+    };
+
+    // Try immediately on mount; if browser allows autoplay for this context,
+    // audio can start without an explicit click.
+    unlockAudio();
+
     window.addEventListener("pointerdown", unlockAudio, { passive: true });
+    window.addEventListener("touchstart", unlockAudio, { passive: true });
     window.addEventListener("keydown", unlockAudio);
+    window.addEventListener("focus", unlockAudio);
+    window.addEventListener("pageshow", unlockAudio);
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("focus", unlockAudio);
+      window.removeEventListener("pageshow", unlockAudio);
+      document.removeEventListener("visibilitychange", onVisible);
       [blackholeLayerRef, ambientLayerRef].forEach((refObj) => {
         if (!refObj.current) {
           return;
@@ -129,7 +164,7 @@ export default function BlackholeAudioSystem({
       engineRef.current?.dispose();
       engineRef.current = null;
     };
-  }, [enabled]);
+  }, []);
 
   useEffect(() => {
     engineRef.current?.setEnabled(enabled);

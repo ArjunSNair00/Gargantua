@@ -8,6 +8,7 @@ import {
   Vignette,
 } from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
+import * as THREE from "three";
 
 import Blackhole from "./components/Blackhole";
 import Telemetry from "./components/Telemetry";
@@ -27,6 +28,18 @@ export default function App() {
   }));
   const showAudioMatrix = false;
   const hadPointerLockRef = useRef(false);
+  const canvasCameraRef = useRef({ position: [0, 5, 25], fov: 45 });
+  const orbitControlsRef = useRef(null);
+  const orbitDistanceRef = useRef(20);
+  const fpsPoseRef = useRef({
+    position: new THREE.Vector3(0, 5, 25),
+    quaternion: new THREE.Quaternion(),
+  });
+
+  const onFpsPoseUpdate = useCallback((position, quaternion) => {
+    fpsPoseRef.current.position.copy(position);
+    fpsPoseRef.current.quaternion.copy(quaternion);
+  }, []);
 
   const exitFpsMode = useCallback((restoreUi = true) => {
     setFpsMode(false);
@@ -41,6 +54,14 @@ export default function App() {
 
   const enterFpsMode = useCallback(() => {
     hadPointerLockRef.current = false;
+
+    if (orbitControlsRef.current) {
+      const controls = orbitControlsRef.current;
+      orbitDistanceRef.current = controls.object.position.distanceTo(
+        controls.target,
+      );
+    }
+
     setFpsMode(true);
     setCinematicMode(true);
 
@@ -71,15 +92,40 @@ export default function App() {
   }, [enterFpsMode, exitFpsMode, fpsMode]);
 
   useEffect(() => {
+    if (!fpsMode && orbitControlsRef.current) {
+      const controls = orbitControlsRef.current;
+      const pose = fpsPoseRef.current;
+
+      controls.object.position.copy(pose.position);
+      controls.object.quaternion.copy(pose.quaternion);
+
+      const forward = new THREE.Vector3(0, 0, -1)
+        .applyQuaternion(pose.quaternion)
+        .normalize();
+      const targetDistance = Math.max(1, orbitDistanceRef.current || 20);
+      controls.target
+        .copy(pose.position)
+        .addScaledVector(forward, targetDistance);
+      controls.update();
+    }
+
+    if (fpsMode) {
+      return;
+    }
+
+    hadPointerLockRef.current = false;
+    if (document.pointerLockElement) {
+      document.exitPointerLock?.();
+    }
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    }
+    setCinematicMode(false);
+    return;
+  }, [fpsMode]);
+
+  useEffect(() => {
     if (!fpsMode) {
-      hadPointerLockRef.current = false;
-      if (document.pointerLockElement) {
-        document.exitPointerLock?.();
-      }
-      if (document.fullscreenElement) {
-        document.exitFullscreen?.();
-      }
-      setCinematicMode(false);
       return;
     }
 
@@ -165,14 +211,18 @@ export default function App() {
       )}
 
       <div className="absolute inset-0 z-0">
-        <Canvas camera={{ position: [0, 5, 25], fov: 45 }} tabIndex={0}>
+        <Canvas camera={canvasCameraRef.current} tabIndex={0}>
           <color attach="background" args={["#000000"]} />
           <ambientLight intensity={0.1} />
           <Suspense fallback={null}>
             <Blackhole mass={mass} spin={spin} />
           </Suspense>
 
-          <FPSCamera active={fpsMode} mass={mass} />
+          <FPSCamera
+            active={fpsMode}
+            mass={mass}
+            onCameraPoseUpdate={onFpsPoseUpdate}
+          />
           <BlackholeAudioSystem
             mass={mass}
             spin={spin}
@@ -180,15 +230,15 @@ export default function App() {
             enabled={audioEnabled}
             controls={audioControls}
           />
-          {!fpsMode && (
-            <OrbitControls
-              enablePan={false}
-              enableDamping
-              dampingFactor={0.05}
-              minDistance={8}
-              maxDistance={40}
-            />
-          )}
+          <OrbitControls
+            ref={orbitControlsRef}
+            enabled={!fpsMode}
+            enablePan={false}
+            enableDamping
+            dampingFactor={0.05}
+            minDistance={8}
+            maxDistance={40}
+          />
 
           <EffectComposer>
             <Bloom
