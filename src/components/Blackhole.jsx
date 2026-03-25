@@ -180,14 +180,14 @@ void main() {
           vec3 shiftColor = mix(
           vec3(0.8, 0.15, 0.0),
           vec3(0.7, 0.9, 1.0),
-          clamp(dopplerFactor + 0.5, 0.0, 1.0)
+          clamp(-dopplerFactor + 0.5, 0.0, 1.0)
           );
 
           float facingWeight = mix(0.65, 1.25, pow(clamp(diskFacing, 0.0, 1.0), 0.45));
           float baseEmission = 0.34 * diskEdgeFade;
           float texturedEmission = density * 0.88 * diskEdgeFade * diskThicknessFade;
           float brightness = (baseEmission + texturedEmission) * facingWeight;
-          float beaming = pow(clamp(1.0 + dopplerFactor * 0.8, 0.2, 2.4), 1.55);
+          float beaming = pow(clamp(1.0 - dopplerFactor * 0.8, 0.2, 2.4), 1.55);
           brightness *= beaming;
 
           col = baseColor * shiftColor * brightness;
